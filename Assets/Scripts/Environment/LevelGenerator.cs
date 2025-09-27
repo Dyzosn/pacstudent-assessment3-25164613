@@ -22,7 +22,7 @@ public class LevelGenerator : MonoBehaviour
         {0,0,0,0,0,0,5,0,0,0,4,0,0,0},
     };
 
-    // Test map for testing different layouts
+    // Test map for testing different layouts (To test this please check both of "Generate New Map" and "Use Test Map" in inspector)
     private int[,] testMap =
     {
         {1,2,2,7},
@@ -31,13 +31,15 @@ public class LevelGenerator : MonoBehaviour
         {1,2,2,3}
     };
 
+    // Current map being used for generation
+    private int[,] currentMap;
+
     // Prefabs for each tile type
     public GameObject[] tilePrefabs = new GameObject[9]; // Index matches tile type
 
     // Level management
     public GameObject manualLevelParent;
     public Transform proceduralLevelParent;
-    public Camera gameCamera;
 
     // Control flags
     public bool generateNewMap = false;
@@ -48,23 +50,17 @@ public class LevelGenerator : MonoBehaviour
         // Only generate procedural level if flag is enabled
         if (generateNewMap)
         {
-            // Disable manual level but don't destroy it (needed for grading)
+            // Disable manual level
             if (manualLevelParent != null)
             {
                 manualLevelParent.SetActive(false);
             }
 
-            // Use test map if flag is enabled
-            if (useTestMap)
-            {
-                levelMap = testMap;
-            }
+            // Set which map to use
+            currentMap = useTestMap ? testMap : levelMap;
 
             // Generate the procedural level
             GenerateProceduralLevel();
-
-            // Adjust camera to show the whole level
-            AdjustCameraToLevel();
         }
         // If generateNewMap is false, manual level stays active and nothing happens
     }
@@ -92,17 +88,17 @@ public class LevelGenerator : MonoBehaviour
 
     void GenerateTopLeftQuadrant()
     {
-        int rows = levelMap.GetLength(0);
-        int cols = levelMap.GetLength(1);
+        int rows = currentMap.GetLength(0);
+        int cols = currentMap.GetLength(1);
 
         for (int row = 0; row < rows; row++)
         {
             for (int col = 0; col < cols; col++)
             {
-                int tileType = levelMap[row, col];
+                int tileType = currentMap[row, col];
                 if (tileType == 0) continue; // Skip empty spaces
 
-                // Calculate position based on coordinate system
+                // Calculate position based on manuallevel coordinate system
                 Vector3 position = new Vector3(0.5f + col, 9.5f - row, 0);
 
                 // Calculate rotation based on surrounding tiles
@@ -116,14 +112,14 @@ public class LevelGenerator : MonoBehaviour
 
     void GenerateTopRightQuadrant()
     {
-        int rows = levelMap.GetLength(0);
-        int cols = levelMap.GetLength(1);
+        int rows = currentMap.GetLength(0);
+        int cols = currentMap.GetLength(1);
 
         for (int row = 0; row < rows; row++)
         {
             for (int col = 0; col < cols; col++)
             {
-                int tileType = levelMap[row, col];
+                int tileType = currentMap[row, col];
                 if (tileType == 0) continue;
 
                 // Mirror horizontally (coordinates: 14.5 to 27.5)
@@ -139,15 +135,15 @@ public class LevelGenerator : MonoBehaviour
 
     void GenerateBottomLeftQuadrant()
     {
-        int rows = levelMap.GetLength(0);
-        int cols = levelMap.GetLength(1);
+        int rows = currentMap.GetLength(0);
+        int cols = currentMap.GetLength(1);
 
         // Skip last row to avoid duplication (specs requirement)
         for (int row = 0; row < rows - 1; row++)
         {
             for (int col = 0; col < cols; col++)
             {
-                int tileType = levelMap[row, col];
+                int tileType = currentMap[row, col];
                 if (tileType == 0) continue;
 
                 // Mirror vertically
@@ -163,15 +159,15 @@ public class LevelGenerator : MonoBehaviour
 
     void GenerateBottomRightQuadrant()
     {
-        int rows = levelMap.GetLength(0);
-        int cols = levelMap.GetLength(1);
+        int rows = currentMap.GetLength(0);
+        int cols = currentMap.GetLength(1);
 
         // Skip last row to avoid duplication
         for (int row = 0; row < rows - 1; row++)
         {
             for (int col = 0; col < cols; col++)
             {
-                int tileType = levelMap[row, col];
+                int tileType = currentMap[row, col];
                 if (tileType == 0) continue;
 
                 // Mirror both horizontally and vertically
@@ -195,89 +191,174 @@ public class LevelGenerator : MonoBehaviour
 
         float rotation = 0f;
 
-        // Check what type of tile this is and calculate appropriate rotation
+        // Get detailed info about surrounding pieces
+        bool[] connections = GetConnectionDirections(row, col);
+        // Index: 0=Up, 1=Right, 2=Down, 3=Left
+
         if (tileType == 1 || tileType == 3) // Corners
         {
-            rotation = CalculateCornerRotation(row, col);
+            rotation = CalculateCornerRotationAdvanced(connections);
         }
-        else if (tileType == 2 || tileType == 4) // Walls
+        else if (tileType == 2 || tileType == 4 || tileType == 8) // Walls
         {
-            rotation = CalculateWallRotation(row, col);
+            rotation = CalculateWallRotationAdvanced(connections);
         }
         else if (tileType == 7) // T-junction
         {
-            rotation = CalculateTJunctionRotation(row, col);
+            rotation = CalculateTJunctionRotationAdvanced(connections);
         }
-        // Pellets and other types don't need rotation
 
         // Apply mirroring adjustments
-        if (flipHorizontal)
-        {
-            rotation = 360f - rotation;
-        }
-        if (flipVertical)
-        {
-            rotation = 360f - rotation;
-        }
+        rotation = ApplyMirroringRotation(rotation, tileType, flipHorizontal, flipVertical);
 
         return rotation % 360f;
     }
 
-    float CalculateCornerRotation(int row, int col)
+    bool[] GetConnectionDirections(int row, int col)
     {
-        // Check which directions have walls or other tiles
-        bool hasUp = GetTileTypeAt(row - 1, col) != 0;
-        bool hasDown = GetTileTypeAt(row + 1, col) != 0;
-        bool hasLeft = GetTileTypeAt(row, col - 1) != 0;
-        bool hasRight = GetTileTypeAt(row, col + 1) != 0;
+        bool[] connections = new bool[4]; // Up, Right, Down, Left
 
-        // Determine corner orientation based on connections
-        if (hasDown && hasRight) return 0f;   // Top-left corner
-        if (hasDown && hasLeft) return 90f;   // Top-right corner
-        if (hasUp && hasLeft) return 180f;    // Bottom-right corner
-        if (hasUp && hasRight) return 270f;   // Bottom-left corner
+        // Check each direction for pieces that should connect
+        connections[0] = ShouldConnectTo(row - 1, col); // Up
+        connections[1] = ShouldConnectTo(row, col + 1); // Right  
+        connections[2] = ShouldConnectTo(row + 1, col); // Down
+        connections[3] = ShouldConnectTo(row, col - 1); // Left
 
-        return 0f; // Default
+        return connections;
     }
 
-    float CalculateWallRotation(int row, int col)
+    bool ShouldConnectTo(int row, int col)
     {
-        // Check adjacent tiles to determine if wall should be horizontal or vertical
-        bool hasUpDown = (GetTileTypeAt(row - 1, col) != 0) || (GetTileTypeAt(row + 1, col) != 0);
-        bool hasLeftRight = (GetTileTypeAt(row, col - 1) != 0) || (GetTileTypeAt(row, col + 1) != 0);
+        int tileType = GetTileTypeAt(row, col);
+        // Only connect to actual wall/corner pieces, not pellets or empty
+        return tileType == 1 || tileType == 2 || tileType == 3 || tileType == 4 || tileType == 7 || tileType == 8;
+    }
 
-        if (hasUpDown && !hasLeftRight)
+    float CalculateCornerRotationAdvanced(bool[] connections)
+    {
+        // Corner should connect exactly 2 adjacent directions
+        // connections[0]=Up, [1]=Right, [2]=Down, [3]=Left
+
+        if (connections[2] && connections[1]) return 0f;   // Down + Right = 0° (top-left style)
+        if (connections[2] && connections[3]) return 270f; // Down + Left = 270° (top-right style)  
+        if (connections[0] && connections[3]) return 180f; // Up + Left = 180° (bottom-right style)
+        if (connections[0] && connections[1]) return 90f;  // Up + Right = 90° (bottom-left style)
+
+        return 0f; // Default fallback
+    }
+
+    float CalculateWallRotationAdvanced(bool[] connections)
+    {
+        // Wall should connect 2 opposite directions
+
+        if ((connections[0] && connections[2]) || // Up-Down connection
+            (connections[0] && !connections[1] && !connections[2] && !connections[3]) || // Only up
+            (!connections[0] && !connections[1] && connections[2] && !connections[3])) // Only down
         {
             return 90f; // Vertical wall
         }
-        return 0f; // Horizontal wall
+
+        if ((connections[1] && connections[3]) || // Left-Right connection  
+            (connections[1] && !connections[0] && !connections[2] && !connections[3]) || // Only right
+            (!connections[0] && !connections[1] && !connections[2] && connections[3])) // Only left
+        {
+            return 0f; // Horizontal wall
+        }
+
+        // Default: horizontal
+        return 0f;
     }
 
-    float CalculateTJunctionRotation(int row, int col)
+    float CalculateTJunctionRotationAdvanced(bool[] connections)
     {
-        // Check which three directions have connections
-        bool hasUp = GetTileTypeAt(row - 1, col) != 0;
-        bool hasDown = GetTileTypeAt(row + 1, col) != 0;
-        bool hasLeft = GetTileTypeAt(row, col - 1) != 0;
-        bool hasRight = GetTileTypeAt(row, col + 1) != 0;
+        // T-junction should connect 3 directions, opening toward the 4th
 
-        // T-junction orientation based on which direction is open
-        if (!hasUp && hasDown && hasLeft && hasRight) return 0f;    // Opening up
-        if (!hasRight && hasUp && hasDown && hasLeft) return 90f;   // Opening right
-        if (!hasDown && hasUp && hasLeft && hasRight) return 180f;  // Opening down
-        if (!hasLeft && hasUp && hasDown && hasRight) return 270f;  // Opening left
+        // Count connections
+        int connectionCount = 0;
+        for (int i = 0; i < 4; i++)
+        {
+            if (connections[i]) connectionCount++;
+        }
+
+        if (connectionCount == 3)
+        {
+            // Find the missing direction (where T opens)
+            if (!connections[0]) return 0f;   // Opens Up (T) shape
+            if (!connections[1]) return 90f;  // Opens Right (|--) shape  
+            if (!connections[2]) return 180f; // Opens Down (Inverted T) shape
+            if (!connections[3]) return 270f; // Opens Left (--|) shape
+        }
+
+        // Fallback for edge cases - try to make best guess
+        if (connections[1] && connections[2] && connections[3]) return 0f;   // Missing up
+        if (connections[0] && connections[2] && connections[3]) return 90f;  // Missing right
+        if (connections[0] && connections[1] && connections[3]) return 180f; // Missing down  
+        if (connections[0] && connections[1] && connections[2]) return 270f; // Missing left
 
         return 0f; // Default
+    }
+
+    float ApplyMirroringRotation(float originalRotation, int tileType, bool flipH, bool flipV)
+    {
+        float newRotation = originalRotation;
+
+        if (tileType == 1 || tileType == 3) // Corners
+        {
+            if (flipH && flipV) // Both flips
+            {
+                // 0->180, 90->270, 180->0, 270->90
+                newRotation = (originalRotation + 180f) % 360f;
+            }
+            else if (flipH) // Horizontal flip only
+            {
+                // 0->270, 270->0, 90->180, 180->90
+                if (originalRotation == 0f) newRotation = 270f;
+                else if (originalRotation == 90f) newRotation = 180f;
+                else if (originalRotation == 180f) newRotation = 90f;
+                else if (originalRotation == 270f) newRotation = 0f;
+            }
+            else if (flipV) // Vertical flip only
+            {
+                // 0->90, 90->0, 180->270, 270->180
+                if (originalRotation == 0f) newRotation = 90f;
+                else if (originalRotation == 90f) newRotation = 0f;
+                else if (originalRotation == 180f) newRotation = 270f;
+                else if (originalRotation == 270f) newRotation = 180f;
+            }
+        }
+        else if (tileType == 7) // T-junction
+        {
+            if (flipH && flipV) // Both flips
+            {
+                // 0->180, 90->270, 180->0, 270->90
+                newRotation = (originalRotation + 180f) % 360f;
+            }
+            else if (flipH) // Horizontal flip only
+            {
+                // 0->0, 180->180, 90->270, 270->90
+                if (originalRotation == 90f) newRotation = 270f;
+                else if (originalRotation == 270f) newRotation = 90f;
+            }
+            else if (flipV) // Vertical flip only
+            {
+                // 0->180, 180->0, 90->90, 270->270
+                if (originalRotation == 0f) newRotation = 180f;
+                else if (originalRotation == 180f) newRotation = 0f;
+            }
+        }
+        // Walls stay the same (they work in both orientations after mirroring)
+
+        return newRotation;
     }
 
     int GetTileTypeAt(int row, int col)
     {
         // Safe array access with bounds checking
-        if (row < 0 || row >= levelMap.GetLength(0) || col < 0 || col >= levelMap.GetLength(1))
+        if (row < 0 || row >= currentMap.GetLength(0) || col < 0 || col >= currentMap.GetLength(1))
         {
             return 0; // Out of bounds = empty
         }
-        return levelMap[row, col];
+        return currentMap[row, col];
     }
 
     void CreateTile(int tileType, Vector3 position, float rotation)
@@ -288,29 +369,8 @@ public class LevelGenerator : MonoBehaviour
             GameObject newTile = Instantiate(tilePrefabs[tileType], position, Quaternion.Euler(0, 0, rotation));
             newTile.transform.SetParent(proceduralLevelParent);
 
-            // Name it for easier debugging
+            // Name it (for easier debugging)
             newTile.name = $"Tile_{tileType}_R{position.y}_C{position.x}";
         }
-    }
-
-    void AdjustCameraToLevel()
-    {
-        // Calculate the bounds of the generated level
-        int rows = levelMap.GetLength(0);
-        int cols = levelMap.GetLength(1);
-
-        // Total level size with all quadrants
-        float totalWidth = cols * 2; // Two quadrants side by side
-        float totalHeight = (rows - 1) * 2; // Account for skipped bottom row
-
-        // Position camera at center of level
-        float centerX = totalWidth / 2f;
-        float centerY = -totalHeight / 4f; // Adjust for coordinate system
-
-        gameCamera.transform.position = new Vector3(centerX, centerY, -10f);
-
-        // Set camera size to show entire level with some padding
-        float maxDimension = Mathf.Max(totalWidth, totalHeight);
-        gameCamera.orthographicSize = maxDimension / 2f + 2f;
     }
 }
