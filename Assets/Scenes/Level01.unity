@@ -43635,8 +43635,7 @@ MonoBehaviour:
   - {fileID: 4012840629367110120, guid: 9ce521d361f9bad4ba380353e429eb1c, type: 3}
   manualLevelParent: {fileID: 946581053}
   proceduralLevelParent: {fileID: 1274396545}
-  gameCamera: {fileID: 57156356}
-  generateNewMap: 0
+  generateNewMap: 1
   useTestMap: 0
 --- !u!1001 &1859474112
 PrefabInstance:
